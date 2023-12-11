@@ -2,79 +2,143 @@
 using System.IO;
 using System.Net;
 using System.IO.Compression;
+using System.Threading.Channels;
+using System.Runtime.CompilerServices;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Drawing;
 
 class Program
 {
     private const string DownloadUrl = "https://thomasg.ca/uploads/Lethal Company.zip";
-    private static string? extractPath; // Set this to the desired extraction path
+    private static string? extractPath;
+
+    private const string BackupFolderName = "BepInEx";
+    private const string BackupFileNameFormat = "Backup_{0}.zip";
+
+    #region Methods
 
     static void Main()
     {
-        Banner();
         CheckAndSetDefaultPath();
         Menu();
     }
 
-    private static void Menu()
+    private static void CheckAndSetDefaultPath()
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("Options: \r\n");
-        Console.WriteLine("1. Install \r\n");
-        Console.WriteLine("2. Backup \r\n");
-        Console.WriteLine("3. Restore \r\n");
+        string[] possibleExtractPaths = new string[]
+        {
+        @"C:\Program Files (x86)\Steam\steamapps\common\Lethal Company",
+        @"G:\SteamLibrary\steamapps\common\Lethal Company",
+        @"D:\SteamLibrary\steamapps\common\Lethal Company",
+        @"F:\SteamLibrary\steamapps\common\Lethal Company",
+        @"E:\SteamLibrary\steamapps\common\Lethal Company",
+        @"G:\Games\SteamLibrary\steamapps\common\Lethal Company",
+        @"D:\Games\SteamLibrary\steamapps\common\Lethal Company",
+        @"F:\Games\SteamLibrary\steamapps\common\Lethal Company",
+        @"E:\Games\SteamLibrary\steamapps\common\Lethal Company",
+        @"G:\Game\SteamLibrary\steamapps\common\Lethal Company",
+        @"D:\Game\SteamLibrary\steamapps\common\Lethal Company",
+        @"F:\Game\SteamLibrary\steamapps\common\Lethal Company",
+        @"E:\Game\SteamLibrary\steamapps\common\Lethal Company"
+        };
+
+        foreach (string path in possibleExtractPaths)
+        {
+            if (Directory.Exists(path))
+            {
+                extractPath = path;
+                return;
+            }
+        }
+
+        Console.WriteLine("The default path doesn't exist. Please enter the installation directory: \r\n(Steam -> Lethal Company -> Right Click -> Properties -> Installed Files -> Browse -> Copy Address Bar)");
 
         string userInput = Console.ReadLine();
-        Console.WriteLine("\r\n");
 
+        while (string.IsNullOrWhiteSpace(userInput) || !Directory.Exists(userInput))
+        {
+            Console.WriteLine("Invalid directory. Please enter a valid installation directory:");
+            userInput = Console.ReadLine();
+        }
+
+        extractPath = userInput;
+    }
+
+    private static void Menu()
+    {
+        Banner();
+        Console.WriteLine("Options: \r\n");
+        Console.WriteLine("1. Install \r\n");
+        Console.WriteLine("2. Install & Launch \r\n");
+        Console.WriteLine("3. Backup \r\n");
+        Console.WriteLine("4. Restore \r\n");
+
+        string userInput = Console.ReadLine();
+        Console.Clear();
 
         if (userInput != null)
         {
             string cleanedInput = userInput.Trim().ToLower();
 
-            if (cleanedInput == "1" || cleanedInput == "install" || cleanedInput == "download" || cleanedInput == "i" || cleanedInput == "banada")
+            switch (cleanedInput)
             {
-                DownloadAndExtract();
-            }
-            else if (cleanedInput == "2" || cleanedInput == "backup" || cleanedInput == "b")
-            {
-                Backup();
-            }
-            else if (cleanedInput == "3" || cleanedInput == "restore" || cleanedInput == "r")
-            {
-                Restore();
-            }
-        }
+                case "1":
+                case "install":
+                case "download":
+                case "i":
+                    DownloadAndExtract();
+                    Console.Clear();
+                    break;
 
+                case "2":
+                case "launch":
+                case "play":
+                    DownloadAndExtract();
+                    LaunchGame();
+                    Console.Clear();
+                    break;
+
+                case "3":
+                case "backup":
+                case "b":
+                    Backup();
+                    Console.Clear();
+                    break;
+
+                case "4":
+                case "restore":
+                case "r":
+                    Restore();
+                    Console.Clear();
+                    break;
+
+                default:
+                    Output("Invalid option. Please try again.\r\n", ConsoleColor.Red);
+                    break;
+            }
+
+            Menu(); // Loop back to the menu
+        }
     }
 
     private static void Backup()
     {
         try
         {
-            Console.WriteLine("Backing up current mods...\r\n");
+            Output("Backing up current mods...\r\n", ConsoleColor.Green);
 
-            // Create a timestamp for the backup file
             string timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
-            string backupFileName = $"Backup_{timestamp}.zip";
+            string backupFileName = string.Format(BackupFileNameFormat, timestamp);
             string backupFilePath = Path.Combine(extractPath!, backupFileName);
+            string pluginsFolderPath = Path.Combine(extractPath!, BackupFolderName);
 
-            // Specify the path to the Plugins folder
-            string pluginsFolderPath = Path.Combine(extractPath!, "BepInEx");
-
-            // Create a backup ZIP file containing only the Plugins folder
             ZipFile.CreateFromDirectory(pluginsFolderPath, backupFilePath);
 
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Backup created successfully: {extractPath}\\{backupFileName}\r\n");
-
-            // Display success message
-            Menu();
+            Output($"Backup created successfully: {extractPath}\\{backupFileName}\r\n", ConsoleColor.Green);
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            // Display an error message if an exception occurs
-            Console.WriteLine($"An error occurred during backup: {ex.Message}");
+            HandleError($"An error occurred during backup: {ex.Message}");
         }
     }
 
@@ -82,49 +146,95 @@ class Program
     {
         try
         {
-            Console.WriteLine("Restoring mods from backup...\r\n");
+            Output("Restoring mods from backup...\r\n", ConsoleColor.Green);
 
-            // Prompt the user to enter the backup file path
             Console.WriteLine("Enter the full path of the backup file (Right click -> Copy as path):");
-            string? backupFilePath = Console.ReadLine()?.Trim('"'); // Remove surrounding quotes if present
+            string? backupFilePath = Console.ReadLine()?.Trim('"');
             Console.WriteLine("\r\n");
+
             if (File.Exists(backupFilePath))
             {
-                // Specify the path to the Plugins folder
-                string bepInExFolderPath = Path.Combine(extractPath!, "BepInEx");
-
-                // Delete existing Plugins folder
+                string bepInExFolderPath = Path.Combine(extractPath!, BackupFolderName);
                 DeleteDirectory(bepInExFolderPath);
-
-                // Create the Plugins folder if it doesn't exist
                 Directory.CreateDirectory(bepInExFolderPath);
-
-                // Extract only the Plugins folder from the backup file
                 ZipFile.ExtractToDirectory(backupFilePath, bepInExFolderPath);
 
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("Mods restored successfully\r\n");
-
-                // Display success message
-                Menu();
+                Output("Mods restored successfully\r\n", ConsoleColor.Green);
             }
             else
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Backup file not found. Please make sure the file path is correct and try again.\r\n");
-                Menu();
+                Output("Backup file not found. Please make sure the file path is correct and try again.\r\n", ConsoleColor.Red);
             }
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            // Display an error message if an exception occurs
-            Console.WriteLine($"An error occurred during restore: {ex.Message}");
+            HandleError($"An error occurred during restore: {ex.Message}");
         }
     }
 
+    private static void DownloadAndExtract()
+    {
+        try
+        {
+            Output("Downloading file...\r\n", ConsoleColor.Green);
 
+            // Create a WebClient and download ZIP file
+            using (WebClient webClient = new())
+            {
+                webClient.DownloadFile(new Uri(DownloadUrl), "Lethal Company.zip");
+            }
 
+            Output("File downloaded...\r\n", ConsoleColor.Green);
+
+            Output("Deleting old BepInEx folder...", ConsoleColor.Red);
+
+            // Delete old mods
+            DeleteDirectory(Path.Combine(extractPath!, "BepInEx"));
+            Thread.Sleep(1000);
+
+            Output("Deleting old winthttp file...", ConsoleColor.Red);
+
+            // Delete old BepInEx files
+            DeleteFile(Path.Combine(extractPath!, "winhttp.dll"));
+            Thread.Sleep(1000);
+
+            Output("Deleting old doorstop_config file...\r\n", ConsoleColor.Red);
+
+            // Delete old BepInEx files
+            DeleteFile(Path.Combine(extractPath!, "doorstop_config.ini"));
+            Thread.Sleep(1000);
+
+            Output("Old mods removed...\r\n", ConsoleColor.Green);
+
+            Output("Extracting mods...\r\n", ConsoleColor.Red);
+
+            // Extract mods
+            ZipFile.ExtractToDirectory("Lethal Company.zip", extractPath!);
+            Thread.Sleep(1000);
+
+            Output("Mods extracted...\r\n", ConsoleColor.Green);
+
+            Output("Deleting downloaded zip...\r\n", ConsoleColor.Red);
+
+            // Delete downloaded ZIp
+            File.Delete("Lethal Company.zip");
+            Thread.Sleep(1000);
+
+            Output("File deleted...\r\n", ConsoleColor.Green);
+
+            Output("Succesfully downloaded and installed mods", ConsoleColor.Green);
+            Console.ReadLine();
+        }
+        catch (Exception ex)
+        {
+            // Display an error message if an exception occurs
+            HandleError($"An error occurred during Download and Extract: {ex.Message}");
+        }
+    }
+
+    #endregion
+
+    #region Helpers
 
     private static void Banner()
     {
@@ -150,102 +260,28 @@ class Program
         Console.WriteLine("Skip To Multiplayer Menu\r\n");
     }
 
-    private static void CheckAndSetDefaultPath()
+    private static void LaunchGame()
     {
-        string defaultPath = @"C:\Program Files (x86)\Steam\steamapps\common\Lethal Company";
-        string jasonPath = @"G:\SteamLibrary\steamapps\common\Lethal Company";
-        string zachPath = @"D:\SteamLibrary\steamapps\common\Lethal Company";
-        string willPath = @"F:\SteamLibrary\steamapps\common\Lethal Company";
-        string vincePath = @"E:\SteamLibrary\steamapps\common\Lethal Company";
-
-        if (Directory.Exists(defaultPath))
-        { extractPath = defaultPath; }
-        else if (Directory.Exists(jasonPath))
-        { extractPath = jasonPath; }
-        else if (Directory.Exists(zachPath))
-        { extractPath = zachPath; }
-        else if (Directory.Exists(willPath))
-        { extractPath = willPath; }
-        else if (Directory.Exists(vincePath))
-        { extractPath = vincePath; }
-        else
-        {
-            Console.WriteLine("The default path doesn't exist. Please enter the installation directory:");
-            string userInput = Console.ReadLine()!;
-
-            while (string.IsNullOrWhiteSpace(userInput) || !Directory.Exists(userInput))
-            {
-                Console.WriteLine("Invalid directory. Please enter a valid installation directory:");
-                userInput = Console.ReadLine()!;
-            }
-
-            extractPath = userInput;
-        }
-
-    }
-
-    private static void DownloadAndExtract()
-    {
+        Console.WriteLine("Launching game... \r\n");
+        Thread.Sleep(1000);
         try
         {
-            Console.WriteLine("Downloading file...\r\n");
-
-            // Create a WebClient for downloading
-            using (WebClient webClient = new())
+            if (Directory.Exists(@"C:\Program Files (x86)\Steam"))
             {
-                // Download the ZIP file
-                webClient.DownloadFile(new Uri(DownloadUrl), "Lethal Company.zip");
+                System.Diagnostics.Process.Start(@"C:\Program Files (x86)\Steam\steam.exe", "steam://rungameid/1966720");
+            }
+            else
+            {
+                Console.WriteLine("You either have 32bit Steam, or you manually installed Steam to a custom path. Why?.");
+                return;
             }
 
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("File downloaded...\r\n");
-            Thread.Sleep(1000);
-
-            Console.ForegroundColor = ConsoleColor.White;
-            // Delete BepInEx folder, and two other files if they exist
-            Console.WriteLine("Deleting old BepInEx folder...");
-            DeleteDirectory(Path.Combine(extractPath!, "BepInEx"));
-            Thread.Sleep(1000);
-            Console.WriteLine("Deleting old winthttp file...");
-            DeleteFile(Path.Combine(extractPath!, "winhttp.dll"));
-            Thread.Sleep(1000);
-            Console.WriteLine("Deleting old doorstop_config file...\r\n");
-            DeleteFile(Path.Combine(extractPath!, "doorstop_config.ini"));
-            Thread.Sleep(1000);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("Old mods removed...\r\n");
-            Thread.Sleep(1000);
-            Console.ForegroundColor = ConsoleColor.White;
-
-            Console.WriteLine("Extracting mods...\r\n");
-            Thread.Sleep(1000);
-            ZipFile.ExtractToDirectory("Lethal Company.zip", extractPath!);
-            Thread.Sleep(1000);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("Mods extracted...\r\n");
-
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine("Deleting downloaded zip...\r\n");
-            Thread.Sleep(1000);
-            File.Delete("Lethal Company.zip");
-            Thread.Sleep(1000);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("File deleted...\r\n");
-
-            // Display success message
-            Menu();
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            // Display an error message if an exception occurs
-            Console.WriteLine($"An error occurred: {ex.Message}");
+            HandleError($"An error occurred launching the game {ex.Message}");
         }
     }
-
 
     private static void DeleteDirectory(string directoryPath)
     {
@@ -262,4 +298,20 @@ class Program
             File.Delete(filePath);
         }
     }
+
+    private static void HandleError(string errorMessage)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine(errorMessage);
+        Thread.Sleep(20000);
+    }
+
+    private static void Output(string output, ConsoleColor color)
+    {
+        Console.ForegroundColor = color;
+        Console.WriteLine(output);
+        Thread.Sleep(1000);
+    }
+
+    #endregion
 }
